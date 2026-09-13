@@ -21,6 +21,9 @@ class AllianceBot(commands.Bot):
         self.check_alliance_panel.start()
         self.scheduler = EventScheduler(self)
 
+        # Clear any existing commands to avoid signature mismatches
+        self.tree.clear_commands(guild=None)
+        
         # Register slash commands
         self.tree.add_command(self.setlogchannel)
         self.tree.add_command(self.disablewar)
