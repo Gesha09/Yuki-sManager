@@ -1,10 +1,12 @@
 import asyncio
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 from config import TOKEN, Pannel_Checks
 from welcome import send_welcome, send_goodbye
 from roleassignment import AllianceView, ensure_alliance_panel
 from scheduler import EventScheduler
+
 
 class AllianceBot(commands.Bot):
     def __init__(self):
@@ -19,11 +21,22 @@ class AllianceBot(commands.Bot):
         self.check_alliance_panel.start()
         self.scheduler = EventScheduler(self)
 
+        # Register slash commands
+        self.tree.add_command(self.setlogchannel)
+        self.tree.add_command(self.disablewar)
+        self.tree.add_command(self.enablewar)
+        self.tree.add_command(self.disablecsw)
+        self.tree.add_command(self.enablecsw)
+
+        # Sync slash commands to Discord
+        await self.tree.sync()
+        print("✅ Slash commands synced!")
+
     async def on_ready(self):
         print(f"✅ Logged in as {self.user.name} (ID: {self.user.id})")
         print(f"🌐 Connected to {len(self.guilds)} server(s)")
-        
-        await asyncio.sleep(5) 
+
+        await asyncio.sleep(5)
         for guild in self.guilds:
             await ensure_alliance_panel(guild)
 
@@ -34,47 +47,113 @@ class AllianceBot(commands.Bot):
         await send_goodbye(member)
 
     # ========================================================
-    # ADMIN COMMANDS FOR EVENT LOGS
+    # SLASH COMMANDS (Admin Only, Ephemeral)
     # ========================================================
-    @commands.command(name="setlogchannel")
-    @commands.has_permissions(administrator=True)
-    @commands.guild_only()
-    async def setlogchannel(self, ctx, channel: discord.TextChannel):
-        self.scheduler.set_log_channel(ctx.guild.id, channel.id)
-        await ctx.send(f"✅ Event reminders and war completions will now go to {channel.mention}.")
 
-    @commands.command(name="disablewar")
-    @commands.has_permissions(administrator=True)
-    @commands.guild_only()
-    async def disablewar(self, ctx, option: str = None):
-        self.scheduler.set_war_disabled_today(ctx.guild.id, True)
+    @app_commands.command(
+        name="setlogchannel",
+        description="Set the channel for event reminders and war completions"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setlogchannel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel
+    ):
+        self.scheduler.set_log_channel(interaction.guild.id, channel.id)
+        await interaction.response.send_message(
+            f"✅ Event reminders and war completions will now go to {channel.mention}.",
+            ephemeral=True
+        )
 
-        if option and option.lower() == "rest":
-            await self.scheduler.send_rest_day_message(ctx.guild)
-            await ctx.send(f"⚠️ Wars **disabled** for today in **{ctx.guild.name}**. Rest message sent. Auto-re-enables tomorrow.")
+    @app_commands.command(
+        name="disablewar",
+        description="Disable all war messages (reminders + completions) for today"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def disablewar(
+        self,
+        interaction: discord.Interaction,
+        send_rest_message: bool = False
+    ):
+        """
+        send_rest_message: If True, sends a 'No war today, take rest' embed to the log channel
+        """
+        self.scheduler.set_war_disabled_today(interaction.guild.id, True)
+
+        if send_rest_message:
+            await self.scheduler.send_rest_day_message(interaction.guild)
+            await interaction.response.send_message(
+                "⚠️ War messages are now **disabled** for today.\n"
+                "A rest message has been sent to the log channel.\n"
+                "They will auto-re-enable tomorrow.",
+                ephemeral=True
+            )
         else:
-            await ctx.send(f"⚠️ Wars **disabled** for today in **{ctx.guild.name}** (silently). Auto-re-enables tomorrow.")
+            await interaction.response.send_message(
+                "⚠️ War messages are now **disabled** for today (silently).\n"
+                "They will auto-re-enable tomorrow.",
+                ephemeral=True
+            )
 
-    @commands.command(name="enablewar")
-    @commands.has_permissions(administrator=True)
-    @commands.guild_only()
-    async def enablewar(self, ctx):
-        self.scheduler.set_war_disabled_today(ctx.guild.id, False)
-        await ctx.send(f"✅ Wars **enabled** for **{ctx.guild.name}**.")
+    @app_commands.command(
+        name="enablewar",
+        description="Re-enable war messages if they were disabled"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def enablewar(self, interaction: discord.Interaction):
+        self.scheduler.set_war_disabled_today(interaction.guild.id, False)
+        await interaction.response.send_message(
+            "✅ War messages are now **enabled**.",
+            ephemeral=True
+        )
 
-    @commands.command(name="disablecsw")
-    @commands.has_permissions(administrator=True)
-    @commands.guild_only()
-    async def disablecsw(self, ctx):
-        self.scheduler.set_csw_disabled(ctx.guild.id, True)
-        await ctx.send(f"⚠️ **CSW** messages disabled for **{ctx.guild.name}**. Use `!enablecsw` to re-enable.")
+    @app_commands.command(
+        name="disablecsw",
+        description="Permanently disable Cross-Server War messages"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def disablecsw(self, interaction: discord.Interaction):
+        self.scheduler.set_csw_disabled(interaction.guild.id, True)
+        await interaction.response.send_message(
+            "⚠️ **Cross-Server War** messages are now **disabled**.\n"
+            "Use `/enablecsw` to turn them back on.",
+            ephemeral=True
+        )
 
-    @commands.command(name="enablecsw")
-    @commands.has_permissions(administrator=True)
-    @commands.guild_only()
-    async def enablecsw(self, ctx):
-        self.scheduler.set_csw_disabled(ctx.guild.id, False)
-        await ctx.send(f"✅ **CSW** messages enabled for **{ctx.guild.name}**.")
+    @app_commands.command(
+        name="enablecsw",
+        description="Re-enable Cross-Server War messages"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def enablecsw(self, interaction: discord.Interaction):
+        self.scheduler.set_csw_disabled(interaction.guild.id, False)
+        await interaction.response.send_message(
+            "✅ **Cross-Server War** messages are now **enabled**.",
+            ephemeral=True
+        )
+
+    # ========================================================
+    # ERROR HANDLER (for missing permissions)
+    # ========================================================
+    async def on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ You need **Administrator** permission to use this command.",
+                ephemeral=True
+            )
+        else:
+            print(f"⚠️ Slash command error: {error}")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Something went wrong.",
+                    ephemeral=True
+                )
+
     # ========================================================
     # TASKS
     # ========================================================
@@ -83,9 +162,10 @@ class AllianceBot(commands.Bot):
         for guild in self.guilds:
             await ensure_alliance_panel(guild)
 
-    @check_alliance_panel.before_loop 
+    @check_alliance_panel.before_loop
     async def before_panel_check(self):
         await self.wait_until_ready()
+
 
 if __name__ == "__main__":
     bot = AllianceBot()
