@@ -9,131 +9,48 @@ from config import (
     Reminder_Lead_Time,
     TIMEZONE
 )
+from alliance_manager import AllianceManager
 
 SETTINGS_FILE = "bot_settings.json"
 
-# ============================================================
-# SCHEDULER
-# ============================================================
+
 class EventScheduler:
     def __init__(self, bot):
         self.bot = bot
+        self.alliance_manager = AllianceManager()
 
-        # Keeps track of reminders that have already been sent
         self.sent_reminders = set()
-        # Keeps track of completed events
         self.sent_completion_messages = set()
 
-        # Per-server settings (loaded from JSON)
-        # Structure: { guild_id (int): { "log_channel_id": int, "csw_disabled": bool, ... } }
-        self.servers = {}
-
-        self.load_settings()
         self.check_events.start()
 
-    # ========================================================
-    # JSON LOAD / SAVE
-    # ========================================================
-    def load_settings(self):
-        try:
-            if os.path.exists(SETTINGS_FILE):
-                with open(SETTINGS_FILE, "r") as f:
-                    data = json.load(f)
-                    for guild_id_str, settings in data.get("servers", {}).items():
-                        self.servers[int(guild_id_str)] = {
-                            "log_channel_id": settings.get("log_channel_id"),
-                            "csw_disabled": settings.get("csw_disabled", False),
-                            "war_disabled_today": settings.get("war_disabled_today", False),
-                            "war_disabled_date": settings.get("war_disabled_date"),
-                        }
-                print(f"[Scheduler] ✅ Loaded settings for {len(self.servers)} server(s) from {SETTINGS_FILE}")
-            else:
-                print(f"[Scheduler] ℹ️ {SETTINGS_FILE} not found. Creating a fresh one.")
-                self.save_settings()
-        except Exception as e:
-            print(f"[Scheduler] ⚠️ Error loading settings: {e}")
-            self.servers = {}
-
-    def save_settings(self):
-        try:
-            data = {
-                "servers": {
-                    str(guild_id): settings for guild_id, settings in self.servers.items()
-                }
-            }
-            with open(SETTINGS_FILE, "w") as f:
-                json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"[Scheduler] ⚠️ Error saving settings: {e}")
-
-    def get_server_settings(self, guild_id):
-        """Returns the settings dict for a guild, creating a default one if missing."""
-        if guild_id not in self.servers:
-            self.servers[guild_id] = {
-                "log_channel_id": None,
-                "csw_disabled": False,
-                "war_disabled_today": False,
-                "war_disabled_date": None,
-            }
-        return self.servers[guild_id]
-
-    # ========================================================
-    # SETTERS (called by commands)
-    # ========================================================
-    def set_log_channel(self, guild_id, channel_id):
-        settings = self.get_server_settings(guild_id)
-        settings["log_channel_id"] = channel_id
-        self.save_settings()
-
-    def set_csw_disabled(self, guild_id, disabled: bool):
-        settings = self.get_server_settings(guild_id)
-        settings["csw_disabled"] = disabled
-        self.save_settings()
-
-    def set_war_disabled_today(self, guild_id, disabled: bool):
-        settings = self.get_server_settings(guild_id)
-        settings["war_disabled_today"] = disabled
-        if disabled:
-            settings["war_disabled_date"] = self.get_now().strftime("%Y-%m-%d")
-        else:
-            settings["war_disabled_date"] = None
-        self.save_settings()
-
-    # ========================================================
-    # CURRENT INDIA TIME
-    # ========================================================
     def get_now(self):
         return datetime.now(ZoneInfo(TIMEZONE))
 
-    # ========================================================
-    # GET LOG CHANNEL
-    # ========================================================
     def get_log_channel(self, guild):
-        settings = self.get_server_settings(guild.id)
+        settings = self.alliance_manager.get_server_settings(guild.id)
         channel_id = settings.get("log_channel_id")
         if not channel_id:
             return None
         return guild.get_channel(channel_id)
 
-    # ========================================================
-    # SEND EVENT REMINDER
-    # ========================================================
     async def send_reminder(self, guild, event_name, event_time, minutes_before, event_type):
-        settings = self.get_server_settings(guild.id)
+        # ✅ Reload settings to get the latest log channel
+        self.alliance_manager.load_settings()
+        
+        settings = self.alliance_manager.get_server_settings(guild.id)
 
-        # Skip CSW reminders if CSW is disabled for THIS server
         if event_type == "cross_server_war" and settings.get("csw_disabled", False):
             print(f"[Scheduler] ⚠️ CSW disabled for {guild.name}. Skipping {event_name}.")
             return
 
-        # Skip ALL war reminders if war is disabled for the day for THIS server
         if event_type in ("alliance_war", "cross_server_war") and settings.get("war_disabled_today", False):
             print(f"[Scheduler] ⚠️ Wars disabled today for {guild.name}. Skipping {event_name}.")
             return
 
         channel = self.get_log_channel(guild)
         if not channel:
-            print(f"⚠️ No log channel set for {guild.name}. Use !setlogchannel.")
+            print(f"⚠️ No log channel set for {guild.name}. Use /setlogchannel.")
             return
 
         if minutes_before == 0:
@@ -152,29 +69,31 @@ class EventScheduler:
             )
 
         embed = discord.Embed(title=title, description=description, color=discord.Color.orange())
-        embed.set_footer(text="The Judgement of Abyssal Tides • India Time")
+        embed.set_footer(text=f"{self.alliance_manager.get_server_name(guild)} • India Time")
 
         await channel.send(content="@everyone", embed=embed)
 
-    # ========================================================
-    # SEND REST DAY MESSAGE
-    # ========================================================
     async def send_rest_day_message(self, guild):
+        # ✅ Reload settings
+        self.alliance_manager.load_settings()
+        
         channel = self.get_log_channel(guild)
         if not channel:
             print(f"[Scheduler] ⚠️ No log channel for {guild.name}. Cannot send rest message.")
             return
 
+        server_name = self.alliance_manager.get_server_name(guild)
+
         embed = discord.Embed(
             title="🛌 No War Today — Take a Rest!",
             description=(
-                "There are **no wars scheduled for today.**\n\n"
+                f"There are **no wars scheduled for today** in **{server_name}**.\n\n"
                 "Relax, recharge, and enjoy the peace, warriors! 🌙\n\n"
                 "**You've earned it. ⚔️💤**"
             ),
             color=discord.Color.blurple()
         )
-        embed.set_footer(text="The Judgement of Abyssal Tides • India Time")
+        embed.set_footer(text=f"{server_name} • India Time")
 
         try:
             await channel.send(content="@everyone", embed=embed)
@@ -182,11 +101,11 @@ class EventScheduler:
         except Exception as error:
             print(f"[Scheduler] ❌ Error sending rest message: {error}")
 
-    # ========================================================
-    # SEND EVENT COMPLETION MESSAGE
-    # ========================================================
     async def send_completion_messages(self, guild, event_name, event_type):
-        settings = self.get_server_settings(guild.id)
+        # ✅ Reload settings
+        self.alliance_manager.load_settings()
+        
+        settings = self.alliance_manager.get_server_settings(guild.id)
 
         if settings.get("war_disabled_today", False):
             print(f"[Scheduler] ⚠️ Wars disabled today for {guild.name}. Skipping completion for {event_name}.")
@@ -198,6 +117,8 @@ class EventScheduler:
 
         if event_type not in ("alliance_war", "cross_server_war"):
             return
+
+        server_name = self.alliance_manager.get_server_name(guild)
 
         if event_type == "alliance_war":
             title = "⚔️ Alliance War Complete!"
@@ -221,11 +142,11 @@ class EventScheduler:
 
         channel = self.get_log_channel(guild)
         if not channel:
-            print(f"[Scheduler] ❌ No log channel for {guild.name}. Use !setlogchannel.")
+            print(f"[Scheduler] ❌ No log channel for {guild.name}. Use /setlogchannel.")
             return
 
         embed = discord.Embed(title=title, description=message, color=discord.Color.gold())
-        embed.set_footer(text="The Judgement of Abyssal Tides • India Time")
+        embed.set_footer(text=f"{server_name} • India Time")
 
         try:
             await channel.send(embed=embed)
@@ -233,23 +154,19 @@ class EventScheduler:
         except Exception as error:
             print(f"[Scheduler] ❌ Error sending completion: {error}")
 
-    # ========================================================
-    # CHECK EVENTS
-    # ========================================================
     @tasks.loop(seconds=5)
     async def check_events(self):
         now = self.get_now()
         current_date = now.strftime("%Y-%m-%d")
 
-        # Auto-reset war_disabled_today if the date has changed
-        for guild_id, settings in self.servers.items():
+        for guild_id, settings in self.alliance_manager.servers.items():
             if settings.get("war_disabled_today", False):
                 disabled_date = settings.get("war_disabled_date")
                 if disabled_date and disabled_date != current_date:
                     settings["war_disabled_today"] = False
                     settings["war_disabled_date"] = None
                     print(f"[Scheduler] ✅ New day. War messages re-enabled for guild {guild_id}.")
-                    self.save_settings()
+                    self.alliance_manager.save_settings()
 
         for event_name, event_data in Events.items():
             event_type = event_data.get("type", "raid")
@@ -288,7 +205,6 @@ class EventScheduler:
                         else:
                             self.sent_reminders.add(reminder_key)
 
-            # EVENT COMPLETION
             if event_type not in ("alliance_war", "cross_server_war"):
                 continue
 

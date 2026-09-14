@@ -1,129 +1,174 @@
+import asyncio
 import discord
 from discord import ui
+from config import Role_Assignment_Channel, Role_Log_Channel
+from alliance_manager import AllianceManager
 
-from config import (
-    Judgement_role_name,
-    Abbysal_role_name,
-    Role_Assignment_Channel,
-    Role_Log_Channel,
-    Pannel_Checks
-)
-#Confirm Join
+alliance_manager = AllianceManager()
+
+
 class ConfirmJoinView(ui.View):
-    def __init__(self, role_name, emoji):
+    def __init__(self, alliance_name, alliance_emoji, role_id):
         super().__init__(timeout=60)
-        self.role_name = role_name
-        self.emoji = emoji
+        self.alliance_name = alliance_name
+        self.alliance_emoji = alliance_emoji
+        self.role_id = role_id
 
-    @ui.button(label="Confirm",emoji="✅", style=discord.ButtonStyle.success)
+    @ui.button(label="Confirm", emoji="✅", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.defer(ephemeral=True)
-        role = discord.utils.get(interaction.guild.roles, name=self.role_name)
-        if role == None:
-            await interaction.edit_original_response(content=f"❌ Role '{self.role_name}' not found.", view=None)
+        role = interaction.guild.get_role(self.role_id)
+
+        if role is None:
+            await interaction.edit_original_response(
+                content="❌ Role not found.", view=None
+            )
             return
+
         if role in interaction.user.roles:
-            await interaction.edit_original_response(content=f"❌ You already have the {self.role_name} Role!", view=None)
+            await interaction.edit_original_response(
+                content=f"❌ You already have the {self.alliance_name} role!", view=None
+            )
             return
+
         try:
             await interaction.user.add_roles(role)
-        except:
-            await interaction.edit_original_response(content=("❌ couldn't assign role:\n\n make sure bot role is above alliance role"),view=None)
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                content="❌ Couldn't assign role. Bot role must be above alliance role.", view=None
+            )
             return
-        await interaction.edit_original_response(content=f"✅ You have the {self.role_name} Role! {self.emoji}", view=None)
-        await write_join_log(interaction.guild, interaction.user, self.role_name, self.emoji)
-        
-        
-    @ui.button(label="Cancel",emoji="❌", style=discord.ButtonStyle.danger)
+
+        await interaction.edit_original_response(
+            content=f"✅ You now have the {self.alliance_emoji} **{self.alliance_name}** role!", view=None
+        )
+        await write_join_log(interaction.guild, interaction.user, self.alliance_name, self.alliance_emoji)
+
+    @ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.edit_original_response(content="❌ Role assignment cancelled.", view=None)
+        await interaction.response.edit_message(content="❌ Cancelled.", view=None)
 
-#Confirm Leave
+
 class ConfirmLeaveView(ui.View):
-    def __init__(self,role_name,emoji):
+    def __init__(self, alliance_name, alliance_emoji, role_id):
         super().__init__(timeout=60)
-        self.role_name = role_name
-        self.emoji = emoji
-    @ui.button(label="Yes Leave ", emoji="✅", style=discord.ButtonStyle.danger)
-    async def confirm_leave(
-        self,
-        interaction: discord.Interaction,
-        button: ui.Button
-    ):
-        await interaction.response.defer(ephemeral=True)
-        role = discord.utils.get(interaction.guild.roles,name=self.role_name)
+        self.alliance_name = alliance_name
+        self.alliance_emoji = alliance_emoji
+        self.role_id = role_id
 
-        if role == None:
-            await interaction.edit_original_response(content=f"❌ Role **{self.role_name}** was not found.",view=None)
+    @ui.button(label="Yes, Leave", emoji="✅", style=discord.ButtonStyle.danger)
+    async def confirm_leave(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        role = interaction.guild.get_role(self.role_id)
+
+        if role is None:
+            await interaction.edit_original_response(
+                content="❌ Role not found.", view=None
+            )
             return
+
         if role not in interaction.user.roles:
-            await interaction.edit_original_response(content=f"❌ you dont currently have the **{self.role_name}** Alliance role",view=None)
+            await interaction.edit_original_response(
+                content=f"❌ You don't have the **{self.alliance_name}** role.", view=None
+            )
             return
+
         try:
             await interaction.user.remove_roles(role)
         except discord.Forbidden:
-            await interaction.edit_original_response(content="❌ couldn't remove that role.\n\n please make sure bot role is above alliance role!",view=None)
+            await interaction.edit_original_response(
+                content="❌ Couldn't remove role. Bot role must be above alliance role.", view=None
+            )
             return
-        await interaction.edit_original_response(content=f"✅ You have left the **{self.role_name}** Alliance role! {self.emoji}",view=None)
-        await write_leave_log(interaction.guild,interaction.user,self.role_name,self.emoji)
-    @ui.button(label="Cancel",emoji="❌",style=discord.ButtonStyle.danger)
-    async def cancel_leaave(
-        self,
-        interaction: discord.Interaction,
-        button: ui.Button
-    ):
-        await interaction.response.edit_message(content="❌ Leaving the alliance role was Canceled",view=None)
-            
+
+        await interaction.edit_original_response(
+            content=f"✅ You left the {self.alliance_emoji} **{self.alliance_name}** role!", view=None
+        )
+        await write_leave_log(interaction.guild, interaction.user, self.alliance_name, self.alliance_emoji)
+
+    @ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.secondary)
+    async def cancel_leave(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.edit_message(content="❌ Cancelled.", view=None)
+
+
 class LeaveAllianceView(ui.View):
-    def __init__(self):
+    def __init__(self, guild_id: int):
         super().__init__(timeout=60)
-    @ui.button(label="Leave Judgement ",emoji="🟨",style=discord.ButtonStyle.danger)
-    async def leave_judgement(
-        self,
-        interaction: discord.Interaction,
-        button: ui.Button
-    ):
-        await interaction.response.edit_message(content="⚠️ **Are you Sure!?** \n\n you are about to leave **Judgement** alliance role \n\n you can join later.",view=ConfirmLeaveView(Judgement_role_name," 🟨"))
-    @ui.button(label="Leave Abyssal Tides",emoji="🟪",style=discord.ButtonStyle.danger)
-    async def leave_abyssal_tides(
-            self,
-            interaction: discord.Interaction,
-            button: ui.Button
-        ):
-            await interaction.response.edit_message(content="⚠️ **Are you Sure!?** \n\n you are about to leave **Abyssal Tides** alliance role \n\n you can join later.",view=ConfirmLeaveView(Abbysal_role_name," 🟪"))
-    @ui.button(label="Cancel",emoji="❌",style=discord.ButtonStyle.secondary)
-    async def cancel_leave(
-        self,
-        interaction: discord.Interaction,
-        button: ui.Button
-    ):
-        interaction.response.edit_message(content="❌ Cancelled!!",view=None)
+        alliances = alliance_manager.get_alliances(guild_id)
 
-class AllianceView(ui.View):
-    def __init__(self):
+        for alliance in alliances:
+            if alliance.get("role_id"):
+                btn = ui.Button(
+                    label=f"Leave {alliance['name']}",
+                    emoji=alliance["emoji"],
+                    style=discord.ButtonStyle.danger
+                )
+                btn.callback = self._make_leave_cb(alliance)
+                self.add_item(btn)
+
+        cancel_btn = ui.Button(label="Cancel", emoji="❌", style=discord.ButtonStyle.secondary)
+        cancel_btn.callback = self._cancel_cb
+        self.add_item(cancel_btn)
+
+    def _make_leave_cb(self, alliance):
+        async def cb(interaction: discord.Interaction):
+            view = ConfirmLeaveView(alliance["name"], alliance["emoji"], alliance["role_id"])
+            await interaction.response.edit_message(
+                content=f"⚠️ Are you sure you want to leave **{alliance['name']}**?",
+                view=view
+            )
+        return cb
+
+    async def _cancel_cb(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(content="❌ Cancelled.", view=None)
+
+
+class DynamicAllianceView(ui.View):
+    def __init__(self, guild_id: int):
         super().__init__(timeout=None)
+        alliances = alliance_manager.get_alliances(guild_id)
 
-    @ui.button(label="Join Judgement", emoji="🟨", style=discord.ButtonStyle.primary, custom_id="join_judgement")
-    async def join_judgement(self, interaction: discord.Interaction, button: ui.Button):
-        role = discord.utils.get(interaction.guild.roles, name=Judgement_role_name)
-        if role:
-            await interaction.response.send_message(f"✅ You have the {Judgement_role_name} Role! 🟨",view=ConfirmJoinView(Judgement_role_name,"🟨"), ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ Role '{Judgement_role_name}' not found.", ephemeral=True)
+        for alliance in alliances:
+            if alliance.get("role_id"):
+                btn = ui.Button(
+                    label=f"Join {alliance['name']}",
+                    emoji=alliance["emoji"],
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"join_{alliance['name'].lower().replace(' ', '_')}"
+                )
+                btn.callback = self._make_join_cb(alliance)
+                self.add_item(btn)
 
-    @ui.button(label="Join Abyssal Tides", emoji="🟪", style=discord.ButtonStyle.primary, custom_id="join_abyssal_tides")
-    async def join_abyssal_tides(self, interaction: discord.Interaction, button: ui.Button):
-        role = discord.utils.get(interaction.guild.roles, name=Abbysal_role_name)
-        if role:
-            await interaction.response.send_message(f"✅ You have the {Abbysal_role_name} Role! 🟪",view=ConfirmJoinView(Abbysal_role_name,"🟪"), ephemeral=True)
-        else:
-            await interaction.response.send_message(f"❌ Role '{Abbysal_role_name}' not found.", ephemeral=True)
-    @ui.button(label="Leave a role", emoji="❌", style=discord.ButtonStyle.primary,custom_id="Leave_role")
-    async def leave_alliance_role(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_message(("❌ **Leave an alliance Role?** which alliance role would you like to leave?"),view=LeaveAllianceView(),ephemeral=True)
+        if alliances:
+            leave_btn = ui.Button(
+                label="Leave a role",
+                emoji="❌",
+                style=discord.ButtonStyle.secondary,
+                custom_id="leave_role"
+            )
+            leave_btn.callback = self._leave_cb
+            self.add_item(leave_btn)
+
+    def _make_join_cb(self, alliance):
+        async def cb(interaction: discord.Interaction):
+            view = ConfirmJoinView(alliance["name"], alliance["emoji"], alliance["role_id"])
+            await interaction.response.send_message(
+                f"Confirm joining **{alliance['emoji']} {alliance['name']}**?",
+                view=view,
+                ephemeral=True
+            )
+        return cb
+
+    async def _leave_cb(self, interaction: discord.Interaction):
+        view = LeaveAllianceView(interaction.guild.id)
+        await interaction.response.send_message(
+            "Which alliance role would you like to leave?",
+            view=view,
+            ephemeral=True
+        )
 
 
-def find_text_channel(guild,channel_name):
+def find_text_channel(guild, channel_name):
     for channel in guild.text_channels:
         if channel.name == channel_name:
             return channel
@@ -132,65 +177,105 @@ def find_text_channel(guild,channel_name):
 
 async def write_join_log(guild, user, role_name, emoji):
     log_channel = find_text_channel(guild, Role_Log_Channel)
-    if log_channel == None:
-        print(f"Log channel '{Role_Log_Channel}' not found in guild '{guild.name}'.")
+    if log_channel is None:
         return
     embed = discord.Embed(
-        title="Role Assignment",
-        description=f"{user.mention} has been assigned the role **{role_name}** {emoji}.",
+        title="Role Assigned",
+        description=f"{user.mention} joined {emoji} **{role_name}**",
         color=discord.Color.green()
     )
-    embed.set_thumbnail(
-        url = user.display_avatar.url
-    )
+    embed.set_thumbnail(url=user.display_avatar.url)
     embed.set_footer(text=f"User ID: {user.id}")
-    await log_channel.send(embed = embed)
+    await log_channel.send(embed=embed)
+
 
 async def write_leave_log(guild, user, role_name, emoji):
     log_channel = find_text_channel(guild, Role_Log_Channel)
-    if log_channel == None:
-        print(f"Log channel '{Role_Log_Channel}' not found in guild '{guild.name}'.")
+    if log_channel is None:
         return
     embed = discord.Embed(
-        title="Role Assignment",
-        description=f"{user.mention}'s role **{role_name}** {emoji} has been DeAssigned.",
+        title="Role Removed",
+        description=f"{user.mention} left {emoji} **{role_name}**",
         color=discord.Color.red()
     )
-    embed.set_thumbnail(
-        url = user.display_avatar.url
-    )
+    embed.set_thumbnail(url=user.display_avatar.url)
     embed.set_footer(text=f"User ID: {user.id}")
-    await log_channel.send(embed = embed)
+    await log_channel.send(embed=embed)
 
-async def create_alliance_panel(channel):
+
+async def create_alliance_panel(guild, channel):
+    alliance_manager.load_settings()
+    server_name = alliance_manager.get_server_name(guild)
+    alliances = alliance_manager.get_alliances(guild.id)
+
+    if alliances:
+        alliance_list = "\n".join(
+            [f"{a['emoji']} **{a['name']}**" for a in alliances]
+        )
+        description = (
+            f"Welcome to **{server_name}**!\n\n"
+            "Our server consists of multiple allied alliances. "
+            "Choose the alliance you belong to by clicking the buttons below.\n\n"
+            f"**Available Alliances:**\n{alliance_list}\n\n"
+            "Please select your alliance below."
+        )
+    else:
+        description = (
+            f"Welcome to **{server_name}**!\n\n"
+            "⚠️ **No alliances have been configured yet.**\n\n"
+            "Please contact a server admin to set up alliances using `/addalliance`."
+        )
+
     embed = discord.Embed(
-        title="⚔️ Alliance Selection/Registration!",
-        description=" Welcome To our Allied Community\n\n" \
-        "Our Server consists of two allied Alliance -- Choose the alliance you belong to by clicking the buttons below.\n\n" \
-        "**🟨 Judgement**\n" \
-        "Members of Judgement Alliance\n\n" \
-        "**🟪 Abyssal Tides**\n" \
-        "Members of Abyssal Tides\n\n" \
-        "**please select your alliance below.**",
-        color=discord.Color.from_rgb(150,150,150)
+        title=f"⚔️ Alliance Registration — {server_name}",
+        description=description,
+        color=discord.Color.from_rgb(150, 150, 150)
     )
-    embed.set_footer(text="Select your alliance to get the role!(if u have multiple ids in both alli you may select both as well).")
-    view = AllianceView()
+    embed.set_footer(text="Select your alliance to get the role!")
+
+    view = DynamicAllianceView(guild.id)
     await channel.send(embed=embed, view=view)
 
-async def ensure_alliance_panel(guild):
-    channel = find_text_channel(guild,Role_Assignment_Channel)
 
+async def ensure_alliance_panel(guild):
+    alliance_manager.load_settings()
+    channel = find_text_channel(guild, Role_Assignment_Channel)
     if channel is None:
-        print(f"⚠️ warning! '{Role_Assignment_Channel}' was not found!")
         return
-    async for message in channel.history(limit = 50):
-        if message.author.id != guild.me.id:
-            continue
-        if not message.embeds:
-            continue
-        embed = message.embeds[0]
-        if embed.title == "⚔️ Alliance Selection/Registration!":
-            print("alliance panel already exists!")
-            return
-    await create_alliance_panel(channel)
+
+    try:
+        async for message in channel.history(limit=50):
+            if message.author.id != guild.me.id:
+                continue
+            if not message.embeds:
+                continue
+            if "Alliance Registration" in message.embeds[0].title:
+                return
+
+        await create_alliance_panel(guild, channel)
+    except discord.errors.HTTPException as e:
+        if e.status == 429:
+            print("⚠️ Rate limited. Waiting 60 seconds...")
+            await asyncio.sleep(60)
+        else:
+            print(f"⚠️ Discord API Error: {e}")
+    except Exception as e:
+        print(f"⚠️ Error in ensure_alliance_panel: {e}")
+
+
+async def refresh_alliance_panel(guild):
+    alliance_manager.load_settings()
+    channel = find_text_channel(guild, Role_Assignment_Channel)
+    if channel is None:
+        return
+
+    try:
+        async for message in channel.history(limit=50):
+            if message.author.id == guild.me.id and message.embeds:
+                if "Alliance Registration" in message.embeds[0].title:
+                    await message.delete()
+
+        await create_alliance_panel(guild, channel)
+        print(f"[RoleAssignment] ✅ Panel refreshed for {guild.name}")
+    except Exception as e:
+        print(f"⚠️ Error refreshing alliance panel: {e}")

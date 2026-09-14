@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands, tasks
 from config import TOKEN, Pannel_Checks
 from welcome import send_welcome, send_goodbye
-from roleassignment import AllianceView, ensure_alliance_panel
+from roleassignment import ensure_alliance_panel
 from scheduler import EventScheduler
 
 
@@ -16,14 +16,13 @@ class AllianceBot(commands.Bot):
         self.scheduler = None
 
     async def setup_hook(self):
-        self.add_view(AllianceView())
         self.check_alliance_panel.start()
         self.scheduler = EventScheduler(self)
 
-        # Load the admin commands cog
+        # Load slash commands from cog
         await self.load_extension("admin_commands")
-        
-        # Sync slash commands
+
+        # Sync slash commands to Discord
         await self.tree.sync()
         print("✅ Slash commands synced!")
 

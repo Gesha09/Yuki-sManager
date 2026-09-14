@@ -1,0 +1,27 @@
+{
+    "servers": {
+        "1512335474130161754": {
+            "server_display_name": null,
+            "log_channel_id": 1536291232882364466,
+            "csw_disabled": true,
+            "war_disabled_today": true,
+            "war_disabled_date": "2026-09-14",
+            "alliances": [
+                {
+                    "name": "Abyssal Tides",
+                    "role_id": 1548937569381781566,
+                    "emoji": "\ud83d\udfea",
+                    "color": "#9B59B6",
+                    "chat_channel_id": null
+                },
+                {
+                    "name": "Judgement",
+                    "role_id": 1548940519034593411,
+                    "emoji": "\ud83d\udfe8",
+                    "color": "#FFD700",
+                    "chat_channel_id": null
+                }
+            ]
+        }
+    }
+}
